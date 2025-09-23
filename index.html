@@ -60,19 +60,51 @@
         a.link-light:hover {
           text-decoration: underline;
         }
+        /* full-height hero row */
+        .hero-row {
+          min-height: 100vh;
+          margin: 0;
+        }
+        
+        /* left column: padding + vertical centering */
+        .left-side {
+          padding: 48px;
+          display: flex;
+          flex-direction: column;
+          justify-content: center; /* vertical center */
+          box-sizing: border-box;
+        }
+        
+        /* right column: image fills the area */
+        .right-side {
+          padding: 0;
+          overflow: hidden;
+        }
+        .right-side img {
+          width: 100%;
+          height: 100vh;
+          object-fit: cover;
+          display: block;
+        }
+        
+        /* responsive tweak */
+        @media (max-width: 991.98px) {
+          .right-side img { height: 40vh; }
+          .hero-row { min-height: auto; }
+        }
     </style>
 </head>
 <body>
-  <div class="row g-0">
+  <div class="row g-0 hero-row">
     <!-- Left side (content) -->
-    <div class="col-md-6 left-side">
+    <div class="col-lg-6 left-side">
       <h1>MediaPipe Holistic Demo</h1>
       <p>Analyze upper limb kinematics directly from your webcam.</p>
       <a href="holistic.html" style="width: 50%" class="btn btn-demo">Run Demo</a>
     </div>
 
     <!-- Right side (full image) -->
-    <div class="col-md-6 right-side">
+    <div class="col-lg-6 right-side">
       <img src="./img/holistic.gif" alt="Holistic Demo">
     </div>
   </div>
