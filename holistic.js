@@ -1,4 +1,21 @@
+
 import DeviceDetector from "https://cdn.skypack.dev/device-detector-js@2.2.10";
+
+// --- NEW STATE & DOM VARIABLES ---
+const subjectInput = document.getElementById('subjectName');
+const startStopBtn = document.getElementById('startStopBtn');
+const statusSpan = document.getElementById('status');
+
+let isRecording = false;
+let keypointsBuffer = [];
+let recordingStartTime = 0;
+
+// !!! IMPORTANT: Set your server's endpoint here !!!
+// This is the URL of your backend server (e.g., Node.js or Python Flask)
+const UPLOAD_ENDPOINT = 'http://localhost:3000/upload-keypoints'; 
+
+// --- ORIGINAL MEDIAPIPE SETUP (Keepers) ---
+
 // Usage: testSupport({client?: string, os?: string}[])
 // Client and os are regular expressions.
 // See: https://cdn.jsdelivr.net/npm/device-detector-js@2.2.10/README.md for
@@ -78,15 +95,39 @@ function connect(ctx, connectors) {
         }
     }
 }
+
 let activeEffect = 'mask';
+
+// --- ADAPTED onResults FUNCTION (Keypoint Buffering Added) ---
 function onResults(results) {
     // Hide the spinner.
     document.body.classList.add('loaded');
-    // Remove landmarks we don't want to draw.
+    
+    // 1. KEYPOINT BUFFERING LOGIC (NEW BLOCK)
+    if (isRecording && results.poseLandmarks) {
+        // Capture time relative to the start of recording
+        const relativeTime = Date.now() - recordingStartTime; 
+        
+        const frameData = {
+            time_ms: relativeTime,
+            // Only include non-null results for efficiency
+            pose: results.poseLandmarks,
+            face: results.faceLandmarks || null,
+            left_hand: results.leftHandLandmarks || null,
+            right_hand: results.rightHandLandmarks || null,
+        };
+        
+        keypointsBuffer.push(frameData);
+    }
+    
+    // Remove landmarks we don't want to draw. (Original logic)
     removeLandmarks(results);
-    // Update the frame rate.
+    
+    // Update the frame rate. (Original logic)
     fpsControl.tick();
-    // Draw the overlays.
+    
+    // 2. DRAWING LOGIC (Original drawing logic follows)
+    
     canvasCtx.save();
     canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
     if (results.segmentationMask) {
@@ -111,8 +152,7 @@ function onResults(results) {
     else {
         canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
     }
-    // Connect elbows to hands. Do this first so that the other graphics will draw
-    // on top of these marks.
+    // Connect elbows to hands.
     canvasCtx.lineWidth = 5;
     if (results.poseLandmarks) {
         if (results.rightHandLandmarks) {
@@ -165,6 +205,84 @@ function onResults(results) {
     drawingUtils.drawConnectors(canvasCtx, results.faceLandmarks, mpHolistic.FACEMESH_LIPS, { color: '#E0E0E0', lineWidth: 5 });
     canvasCtx.restore();
 }
+
+// --- RECORDING AND UPLOAD FUNCTIONS (NEW BLOCK) ---
+
+startStopBtn.addEventListener('click', () => {
+    if (!subjectInput.value) {
+        alert("Please enter a Subject ID.");
+        return;
+    }
+    
+    if (isRecording) {
+        stopRecording();
+    } else {
+        startRecording();
+    }
+});
+
+function startRecording() {
+    isRecording = true;
+    keypointsBuffer = []; // Clear buffer for new run
+    recordingStartTime = Date.now();
+    startStopBtn.textContent = 'Stop Recording';
+    startStopBtn.classList.add('recording');
+    subjectInput.disabled = true;
+    statusSpan.textContent = `Recording started for ${subjectInput.value}...`;
+}
+
+function stopRecording() {
+    isRecording = false;
+    startStopBtn.textContent = 'Uploading...';
+    startStopBtn.classList.remove('recording');
+    startStopBtn.disabled = true;
+    statusSpan.textContent = `Recording stopped. Captured ${keypointsBuffer.length} frames. Uploading...`;
+
+    // Trigger the upload function
+    uploadData();
+}
+
+async function uploadData() {
+    const subjectName = subjectInput.value.replace(/[^a-zA-Z0-9_]/g, ''); // Sanitize name
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `${subjectName}_${timestamp}_keypoints.json`;
+
+    // Convert the keypoints array into a JSON file Blob
+    const keypointsBlob = new Blob([JSON.stringify(keypointsBuffer, null, 2)], { type: 'application/json' });
+
+    const formData = new FormData();
+    formData.append('subject', subjectName);
+    formData.append('keypoints_file', keypointsBlob, filename);
+
+    try {
+        // Send the file to the backend server
+        const response = await fetch(UPLOAD_ENDPOINT, {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+
+        if (response.ok) {
+            statusSpan.textContent = `Upload successful! ${filename} saved to Drive.`;
+        } else {
+            statusSpan.textContent = `Upload Failed: ${result.error || response.statusText}`;
+            console.error('Upload Failed:', result);
+        }
+
+    } catch (error) {
+        statusSpan.textContent = `Network Error: Could not connect to server at ${UPLOAD_ENDPOINT}`;
+        console.error('Upload Network Error:', error);
+    } finally {
+        startStopBtn.disabled = false;
+        startStopBtn.textContent = 'Start Recording';
+        subjectInput.disabled = false;
+    }
+}
+
+
+// --- ORIGINAL HOLISTIC INSTANTIATION AND CONTROLS (Keepers) ---
+
 const holistic = new mpHolistic.Holistic(config);
 holistic.onResults(onResults);
 // Present a control panel through which the user can manipulate the solution
@@ -189,6 +307,9 @@ new controls
             // Resets because the pose gives better results when reset between
             // source changes.
             holistic.reset();
+            // Update the status and enable button once camera starts
+            startStopBtn.disabled = false;
+            statusSpan.textContent = "Camera Ready. Enter Subject ID.";
         },
         onFrame: async (input, size) => {
             const aspect = size.height / size.width;
@@ -238,3 +359,8 @@ new controls
     activeEffect = x['effect'];
     holistic.setOptions(options);
 });
+
+// Initial Status Update
+statusSpan.textContent = "Loading MediaPipe...";
+// Ensure the start/stop button is disabled until the camera is ready (handled by SourcePicker's onSourceChanged)
+startStopBtn.disabled = true;
